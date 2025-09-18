@@ -150,7 +150,7 @@
       url: movieflix_ajax.ajax_url,
       type: "POST",
       data: {
-        action: "movieflix_search",
+        action: "movieflix_search_enhanced",
         search_term: searchTerm,
         nonce: movieflix_ajax.nonce,
       },
@@ -172,6 +172,7 @@
             .html(`
             <div class="search-no-results">
               <p>No movies found for "${searchTerm}"</p>
+              <p><small>Try searching with different keywords</small></p>
             </div>
           `)
             .show()
@@ -193,6 +194,9 @@
   function displaySearchResults(results, container) {
     let html = ""
     results.forEach(function(movie) {
+      const genresHtml = movie.genres ? `<div class="search-result-genres">${movie.genres}</div>` : "";
+      const excerptHtml = movie.excerpt ? `<div class="search-result-excerpt">${movie.excerpt}</div>` : "";
+      
       html += `
         <div class="search-result-item" data-url="${movie.url}">
           <div class="search-result-content">
@@ -201,9 +205,12 @@
                  onerror="this.src='${movieflix_ajax.theme_url}/images/no-poster.jpg'">
             <div class="search-result-info">
               <div class="search-result-title">${movie.title}</div>
+              ${genresHtml}
+              ${excerptHtml}
               <div class="search-result-meta">
                 <span class="search-result-year">${movie.year || 'N/A'}</span>
                 ${movie.rating ? `<span class="search-result-rating">⭐ ${movie.rating}</span>` : ""}
+                ${movie.views ? `<span class="search-result-views">👁 ${movie.views}</span>` : ""}
               </div>
             </div>
           </div>

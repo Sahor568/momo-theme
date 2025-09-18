@@ -59,8 +59,15 @@
                            name="s" 
                            placeholder="Search movies..." 
                            id="movie-search"
-                           value="<?php echo get_search_query(); ?>">
+                           value="<?php echo esc_attr(get_search_query()); ?>"
+                           autocomplete="off">
                     <input type="hidden" name="post_type" value="movie">
+                    <button type="submit" class="search-submit" aria-label="Search">
+                        <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                    </button>
                 </div>
             </form>
             <div class="search-results" id="search-results"></div>

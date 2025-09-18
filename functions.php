@@ -1128,6 +1128,199 @@ function movieflix_modify_main_query($query) {
 add_action('pre_get_posts', 'movieflix_modify_main_query');
 
 /**
+ * Enhanced Search Query Modification
+ */
+function movieflix_modify_search_query($query) {
+    if (!is_admin() && $query->is_main_query() && is_search()) {
+        // Only search in movies
+        $query->set('post_type', array('movie'));
+        
+        // Handle taxonomy filters
+        $tax_query = array('relation' => 'AND');
+        
+        if (isset($_GET['genre']) && !empty($_GET['genre'])) {
+            $tax_query[] = array(
+                'taxonomy' => 'movie_genre',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($_GET['genre']),
+            );
+        }
+        
+        if (isset($_GET['year']) && !empty($_GET['year'])) {
+            $tax_query[] = array(
+                'taxonomy' => 'movie_year',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($_GET['year']),
+            );
+        }
+        
+        if (isset($_GET['quality']) && !empty($_GET['quality'])) {
+            $tax_query[] = array(
+                'taxonomy' => 'movie_quality',
+                'field' => 'slug',
+                'terms' => sanitize_text_field($_GET['quality']),
+            );
+        }
+        
+        if (count($tax_query) > 1) {
+            $query->set('tax_query', $tax_query);
+        }
+        
+        // Handle sorting
+        if (isset($_GET['orderby']) && !empty($_GET['orderby'])) {
+            $orderby = sanitize_text_field($_GET['orderby']);
+            
+            switch ($orderby) {
+                case 'title':
+                    $query->set('orderby', 'title');
+                    $query->set('order', 'ASC');
+                    break;
+                    
+                case 'views':
+                    $query->set('meta_key', '_movie_views');
+                    $query->set('orderby', 'meta_value_num');
+                    $query->set('order', 'DESC');
+                    break;
+                    
+                case 'rating':
+                    $query->set('meta_key', '_movie_imdb_rating');
+                    $query->set('orderby', 'meta_value_num');
+                    $query->set('order', 'DESC');
+                    break;
+                    
+                default:
+                    $query->set('orderby', 'date');
+                    $query->set('order', 'DESC');
+                    break;
+            }
+        } else {
+            $query->set('orderby', 'date');
+            $query->set('order', 'DESC');
+        }
+        
+        // Set posts per page
+        $query->set('posts_per_page', movieflix_get_movies_per_page());
+        
+        // Improve search relevance
+        add_filter('posts_search', 'movieflix_improve_search_relevance', 10, 2);
+    }
+}
+add_action('pre_get_posts', 'movieflix_modify_search_query');
+
+/**
+ * Improve Search Relevance
+ */
+function movieflix_improve_search_relevance($search, $wp_query) {
+    if (!is_search() || empty($search)) {
+        return $search;
+    }
+    
+    global $wpdb;
+    
+    $search_term = $wp_query->get('s');
+    if (empty($search_term)) {
+        return $search;
+    }
+    
+    // Search in title, content, and meta fields
+    $search = '';
+    $search_term = $wpdb->esc_like($search_term);
+    
+    $search .= " AND (";
+    $search .= "({$wpdb->posts}.post_title LIKE '%{$search_term}%')";
+    $search .= " OR ({$wpdb->posts}.post_content LIKE '%{$search_term}%')";
+    $search .= " OR EXISTS (";
+    $search .= "SELECT 1 FROM {$wpdb->postmeta} WHERE {$wpdb->postmeta}.post_id = {$wpdb->posts}.ID";
+    $search .= " AND {$wpdb->postmeta}.meta_value LIKE '%{$search_term}%'";
+    $search .= ")";
+    $search .= ")";
+    
+    return $search;
+}
+
+/**
+ * Enhanced AJAX Search with Better Results
+ */
+function movieflix_ajax_search_enhanced() {
+    check_ajax_referer('movieflix_nonce', 'nonce');
+    
+    $search_term = sanitize_text_field($_POST['search_term']);
+    
+    if (empty($search_term) || strlen($search_term) < 2) {
+        wp_send_json_error('Search term too short');
+        return;
+    }
+    
+    // Enhanced search query
+    $args = array(
+        'post_type' => 'movie',
+        'posts_per_page' => 10,
+        's' => $search_term,
+        'post_status' => 'publish',
+        'orderby' => 'relevance',
+        'meta_query' => array(
+            'relation' => 'OR',
+            array(
+                'key' => '_movie_release_year',
+                'value' => $search_term,
+                'compare' => 'LIKE'
+            ),
+            array(
+                'key' => '_movie_imdb_rating',
+                'value' => $search_term,
+                'compare' => 'LIKE'
+            )
+        )
+    );
+    
+    $movies = get_posts($args);
+    
+    // If no results, try broader search
+    if (empty($movies)) {
+        $args['meta_query'] = array();
+        $args['posts_per_page'] = 5;
+        $movies = get_posts($args);
+    }
+    
+    $results = array();
+    
+    foreach ($movies as $movie) {
+        $poster = get_the_post_thumbnail_url($movie->ID, 'movie-thumb');
+        if (!$poster) {
+            $poster = esc_url(get_template_directory_uri() . '/images/no-poster.jpg');
+        }
+        
+        $year = get_post_meta($movie->ID, '_movie_release_year', true);
+        $rating = get_post_meta($movie->ID, '_movie_imdb_rating', true);
+        $views = get_post_meta($movie->ID, '_movie_views', true);
+        
+        // Get genres
+        $genres = get_the_terms($movie->ID, 'movie_genre');
+        $genre_names = array();
+        if ($genres && !is_wp_error($genres)) {
+            foreach ($genres as $genre) {
+                $genre_names[] = $genre->name;
+            }
+        }
+        
+        $results[] = array(
+            'title' => $movie->post_title,
+            'url' => get_permalink($movie->ID),
+            'poster' => $poster,
+            'year' => $year,
+            'rating' => $rating,
+            'views' => $views ? number_format($views) : '0',
+            'genres' => implode(', ', $genre_names),
+            'excerpt' => wp_trim_words(get_the_excerpt($movie->ID), 15)
+        );
+    }
+    
+    wp_send_json_success($results);
+}
+add_action('wp_ajax_movieflix_search_enhanced', 'movieflix_ajax_search_enhanced');
+add_action('wp_ajax_nopriv_movieflix_search_enhanced', 'movieflix_ajax_search_enhanced');
+
+/**
  * Add Theme Support for Block Editor
  */
 function movieflix_block_editor_support() {
